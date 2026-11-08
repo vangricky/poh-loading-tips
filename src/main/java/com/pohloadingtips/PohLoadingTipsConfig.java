@@ -4,12 +4,42 @@ import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.Range;
-import net.runelite.client.config.Units;
 
 @ConfigGroup(PohLoadingTipsConfig.GROUP)
 public interface PohLoadingTipsConfig extends Config
 {
 	String GROUP = "pohloadingtips";
+
+	enum Content
+	{
+		MEMES("Meme cards"),
+		TIPS("Tips & facts"),
+		MIX("Mix of both");
+
+		private final String label;
+
+		Content(String label)
+		{
+			this.label = label;
+		}
+
+		@Override
+		public String toString()
+		{
+			return label;
+		}
+	}
+
+	@ConfigItem(
+		keyName = "content",
+		name = "Show",
+		description = "What to show on the house loading screen: OSRS meme cards, tips & 'Did you know?' facts, or a mix",
+		position = 0
+	)
+	default Content content()
+	{
+		return Content.MEMES;
+	}
 
 	@ConfigItem(
 		keyName = "showTips",
@@ -43,19 +73,6 @@ public interface PohLoadingTipsConfig extends Config
 	default int textSize()
 	{
 		return 24;
-	}
-
-	@Range(max = 10)
-	@Units(Units.SECONDS)
-	@ConfigItem(
-		keyName = "lingerSeconds",
-		name = "Keep tip after loading",
-		description = "The loading screen only lasts a second or two. Keep the tip on a small banner for this many seconds afterwards so you can finish reading it (0 = off).",
-		position = 4
-	)
-	default int lingerSeconds()
-	{
-		return 4;
 	}
 
 	@ConfigItem(

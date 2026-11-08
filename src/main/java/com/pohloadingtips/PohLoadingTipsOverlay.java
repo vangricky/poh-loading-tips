@@ -11,11 +11,13 @@ import java.awt.Graphics2D;
 import java.awt.Paint;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import javax.inject.Inject;
 import net.runelite.api.Client;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -43,19 +45,20 @@ class PohLoadingTipsOverlay extends Overlay
 
 	private static final int MARGIN = 20;
 	private static final int PANEL_MAX_WIDTH = 620;
-	private static final int BANNER_MAX_WIDTH = 460;
-	private static final int FADE_MS = 600;
 
 	private final Client client;
 	private final PohLoadingTipsPlugin plugin;
 	private final PohLoadingTipsConfig config;
 
+	private final ItemManager itemManager;
+
 	@Inject
-	PohLoadingTipsOverlay(Client client, PohLoadingTipsPlugin plugin, PohLoadingTipsConfig config)
+	PohLoadingTipsOverlay(Client client, PohLoadingTipsPlugin plugin, PohLoadingTipsConfig config, ItemManager itemManager)
 	{
 		this.client = client;
 		this.plugin = plugin;
 		this.config = config;
+		this.itemManager = itemManager;
 		setPosition(OverlayPosition.DYNAMIC);
 		setLayer(OverlayLayer.ABOVE_WIDGETS);
 		setPriority(PRIORITY_HIGHEST);
@@ -64,6 +67,13 @@ class PohLoadingTipsOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D g)
 	{
+		Meme meme = plugin.getCurrentMeme();
+		if (meme != null)
+		{
+			renderMemeCard(g, meme);
+			return null;
+		}
+
 		Tip tip = plugin.getCurrentTip();
 		if (tip == null)
 		{
@@ -79,17 +89,123 @@ class PohLoadingTipsOverlay extends Overlay
 				area = viewport();
 			}
 			renderLoadingScreen(g, area, tip);
-			return null;
-		}
-
-		long lingerMs = config.lingerSeconds() * 1000L;
-		long since = System.currentTimeMillis() - plugin.getClosedAt();
-		if (lingerMs > 0 && plugin.getClosedAt() > 0 && since < lingerMs)
-		{
-			float alpha = since > lingerMs - FADE_MS ? (lingerMs - since) / (float) FADE_MS : 1f;
-			renderBanner(g, tip, alpha, 1f - since / (float) lingerMs);
 		}
 		return null;
+	}
+
+	// ---------------------------------------------------------------- memes
+
+	private static final Color MEME_TEXT = Color.WHITE;
+
+	private void renderMemeCard(Graphics2D g, Meme meme)
+	{
+		if (System.currentTimeMillis() < plugin.getPreviewUntil())
+		{
+			renderMemeScreen(g, viewport(), meme); // ::pohmeme preview
+			return;
+		}
+		if (plugin.isLoadingScreenVisible())
+		{
+			Widget w = plugin.getPohLoadingWidget();
+			Rectangle area = w != null ? w.getBounds() : null;
+			if (area == null || area.width < 50 || area.height < 50)
+			{
+				area = viewport();
+			}
+			renderMemeScreen(g, area, meme);
+		}
+	}
+
+	private void renderMemeScreen(Graphics2D g, Rectangle area, Meme meme)
+	{
+		Paint oldPaint = g.getPaint();
+		g.setPaint(new GradientPaint(0, area.y, SCREEN_TOP, 0, area.y + area.height, SCREEN_BOTTOM));
+		g.fillRect(area.x, area.y, area.width, area.height);
+		g.setPaint(oldPaint);
+
+		int panelW = Math.min(area.width - MARGIN * 2, PANEL_MAX_WIDTH);
+		int pad = 16;
+		int textW = panelW - pad * 2;
+		int n = meme.getItemIds().size();
+
+		// Sprites are 36x32; scale up by a whole number so the pixel art stays crisp.
+		int scale = 4;
+		while (scale > 1 && (n * 36 * scale + (n - 1) * 12 > textW || 32 * scale > area.height / 3))
+		{
+			scale--;
+		}
+		int spriteW = 36 * scale;
+		int spriteH = 32 * scale;
+
+		int size = Math.max(16, config.textSize() + 4);
+		Font font;
+		List<String> top;
+		List<String> bottom;
+		FontMetrics fm;
+		do
+		{
+			font = FontManager.getRunescapeBoldFont().deriveFont(Font.PLAIN, (float) size);
+			fm = g.getFontMetrics(font);
+			top = wrap(meme.getTop(), fm, textW);
+			bottom = wrap(meme.getBottom(), fm, textW);
+			size -= 2;
+		}
+		while ((top.size() + bottom.size()) * fm.getHeight() + spriteH + pad * 4 > area.height - MARGIN * 2 && size >= 14);
+
+		int panelH = pad + top.size() * fm.getHeight() + pad + spriteH + pad + bottom.size() * fm.getHeight() + pad;
+		int px = area.x + (area.width - panelW) / 2;
+		int py = area.y + (area.height - panelH) / 2;
+		drawStonePanel(g, px, py, panelW, panelH);
+
+		g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+		g.setFont(font);
+		int y = py + pad;
+		for (String line : top)
+		{
+			drawOutlined(g, line, px, panelW, y + fm.getAscent(), scale > 2 ? 2 : 1);
+			y += fm.getHeight();
+		}
+		y += pad;
+
+		Object oldInterp = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
+		g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+		int rowW = n * spriteW + (n - 1) * 12;
+		int sx = px + (panelW - rowW) / 2;
+		for (int id : meme.getItemIds())
+		{
+			BufferedImage img = itemManager.getImage(id);
+			if (img != null)
+			{
+				g.drawImage(img, sx, y, spriteW, spriteH, null);
+			}
+			sx += spriteW + 12;
+		}
+		if (oldInterp != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldInterp);
+		y += spriteH + pad;
+
+		for (String line : bottom)
+		{
+			drawOutlined(g, line, px, panelW, y + fm.getAscent(), scale > 2 ? 2 : 1);
+			y += fm.getHeight();
+		}
+	}
+
+
+	/** Classic meme text: white with a black outline, centred. */
+	private static void drawOutlined(Graphics2D g, String s, int x, int w, int baseline, int outline)
+	{
+		FontMetrics fm = g.getFontMetrics();
+		int sx = x + (w - fm.stringWidth(s)) / 2;
+		g.setColor(Color.BLACK);
+		for (int dx = -outline; dx <= outline; dx++)
+		{
+			for (int dy = -outline; dy <= outline; dy++)
+			{
+				if (dx != 0 || dy != 0) g.drawString(s, sx + dx, baseline + dy);
+			}
+		}
+		g.setColor(MEME_TEXT);
+		g.drawString(s, sx, baseline);
 	}
 
 	private Rectangle viewport()
@@ -156,44 +272,6 @@ class PohLoadingTipsOverlay extends Overlay
 		}
 	}
 
-	// ---------------------------------------------------------------- banner
-
-	private void renderBanner(Graphics2D g, Tip tip, float alpha, float remaining)
-	{
-		Rectangle vp = viewport();
-		int bannerW = Math.min(vp.width - MARGIN * 2, BANNER_MAX_WIDTH);
-		if (bannerW < 120)
-		{
-			return;
-		}
-		int pad = 10;
-		int size = Math.min(config.textSize(), 20);
-		Layout layout = new Layout(g, tip, size, bannerW - pad * 2);
-
-		int h = pad + layout.headFm.getHeight() + 4 + layout.lines.size() * layout.bodyFm.getHeight() + pad + 4;
-		int x = vp.x + (vp.width - bannerW) / 2;
-		int y = vp.y + 12;
-
-		Composite old = g.getComposite();
-		g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
-
-		drawStonePanel(g, x, y, bannerW, h);
-		int ty = y + pad;
-		g.setFont(layout.headFont);
-		drawCentered(g, tip.getKind().getHeading(), x, bannerW, ty + layout.headFm.getAscent(), ORANGE);
-		ty += layout.headFm.getHeight() + 4;
-		g.setFont(layout.bodyFont);
-		for (String line : layout.lines)
-		{
-			drawCentered(g, line, x, bannerW, ty + layout.bodyFm.getAscent(), YELLOW);
-			ty += layout.bodyFm.getHeight();
-		}
-		// Time-left strip along the bottom edge
-		g.setColor(ORANGE);
-		g.fillRect(x + 4, y + h - 6, (int) ((bannerW - 8) * Math.max(0f, remaining)), 2);
-
-		g.setComposite(old);
-	}
 
 	// ---------------------------------------------------------------- helpers
 

@@ -8,9 +8,12 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.events.ClientTick;
+import net.runelite.api.events.CommandExecuted;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatMessageBuilder;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
@@ -22,8 +25,8 @@ import net.runelite.client.ui.overlay.OverlayManager;
 @Slf4j
 @PluginDescriptor(
 	name = "POH Loading Tips",
-	description = "Replaces the house loading screen with quick OSRS tips and 'Did you know?' facts",
-	tags = {"poh", "house", "construction", "loading", "tips", "trivia", "facts"}
+	description = "Replaces the house loading screen with OSRS meme cards, quick tips and 'Did you know?' facts",
+	tags = {"poh", "house", "construction", "loading", "tips", "trivia", "facts", "memes"}
 )
 public class PohLoadingTipsPlugin extends Plugin
 {
@@ -44,25 +47,52 @@ public class PohLoadingTipsPlugin extends Plugin
 	@Inject
 	private PohLoadingTipsOverlay overlay;
 
-	private final TipRepository tips = new TipRepository();
+	@Inject
+	private ClientThread clientThread;
 
-	/** Tip for the current (or most recent) loading screen. */
+	@Inject
+	private ItemManager itemManager;
+
+	private final TipRepository tips = new TipRepository();
+	private final MemeRepository memes = new MemeRepository();
+
+	/** Tip for the current (or most recent) loading screen, or null if a meme is showing. */
 	@Getter
 	private Tip currentTip;
+
+	/** Meme for the current (or most recent) loading screen, or null if a tip is showing. */
+	@Getter
+	private Meme currentMeme;
+
+	/** "::pohmeme" shows the next meme card on screen until this time (System.currentTimeMillis). */
+	@Getter
+	private long previewUntil;
+
+	@Subscribe
+	public void onCommandExecuted(CommandExecuted e)
+	{
+		if (!"pohmeme".equalsIgnoreCase(e.getCommand()) || nextMeme == null) return;
+		currentMeme = nextMeme;
+		currentTip = null;
+		previewUntil = System.currentTimeMillis() + 8000;
+		prepareNextMeme();
+	}
+
+	/** Picked ahead of time so its sprites are already loaded when the screen appears. */
+	private Meme nextMeme;
+	private boolean memeTurn = true;
 
 	/** Whether the POH loading screen is up right now. */
 	@Getter
 	private boolean loadingScreenVisible;
 
-	/** When the loading screen came down (System.currentTimeMillis). */
-	@Getter
-	private long closedAt;
 
 	@Override
 	protected void startUp()
 	{
 		overlayManager.add(overlay);
-		log.debug("POH Loading Tips started with {} tips", tips.size());
+		prepareNextMeme();
+		log.debug("POH Loading Tips started with {} tips and {} memes", tips.size(), memes.size());
 	}
 
 	@Override
@@ -71,6 +101,33 @@ public class PohLoadingTipsPlugin extends Plugin
 		overlayManager.remove(overlay);
 		loadingScreenVisible = false;
 		currentTip = null;
+		currentMeme = null;
+		nextMeme = null;
+	}
+
+	/** Picks the next meme and asks RuneLite to load its sprites now, not mid-loading-screen. */
+	private void prepareNextMeme()
+	{
+		nextMeme = memes.next();
+		Meme m = nextMeme;
+		if (m != null)
+		{
+			clientThread.invokeLater(() -> m.getItemIds().forEach(itemManager::getImage));
+		}
+	}
+
+	private boolean showMemeNow()
+	{
+		switch (config.content())
+		{
+			case TIPS:
+				return false;
+			case MIX:
+				memeTurn = !memeTurn;
+				return memeTurn;
+			default:
+				return true;
+		}
 	}
 
 	/**
@@ -89,15 +146,19 @@ public class PohLoadingTipsPlugin extends Plugin
 		loadingScreenVisible = visible;
 		if (visible)
 		{
+			if (showMemeNow() && nextMeme != null)
+			{
+				currentMeme = nextMeme;
+				currentTip = null;
+				prepareNextMeme();
+				return;
+			}
+			currentMeme = null;
 			currentTip = tips.next(t -> t.getKind() == Tip.Kind.TIP ? config.showTips() : config.showFacts());
 			if (currentTip != null && config.sendToChat())
 			{
 				postToChat(currentTip);
 			}
-		}
-		else
-		{
-			closedAt = System.currentTimeMillis();
 		}
 	}
 
