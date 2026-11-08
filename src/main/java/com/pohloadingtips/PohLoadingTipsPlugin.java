@@ -24,7 +24,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 @Slf4j
 @PluginDescriptor(
-	name = "POH Loading Tips",
+	name = "POH Loading Screen",
 	description = "Replaces the house loading screen with OSRS meme cards, quick tips and 'Did you know?' facts",
 	tags = {"poh", "house", "construction", "loading", "tips", "trivia", "facts", "memes"}
 )
@@ -92,7 +92,7 @@ public class PohLoadingTipsPlugin extends Plugin
 	{
 		overlayManager.add(overlay);
 		prepareNextMeme();
-		log.debug("POH Loading Tips started with {} tips and {} memes", tips.size(), memes.size());
+		log.debug("POH Loading Screen started with {} tips and {} memes", tips.size(), memes.size());
 	}
 
 	@Override

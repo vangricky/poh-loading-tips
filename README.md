@@ -1,4 +1,4 @@
-# POH Loading Tips
+# POH Loading Screen
 
 A RuneLite plugin that replaces the broken-down house picture you see while your player-owned house loads. Instead you get an original OSRS meme card, a quick tip or a "Did you know?" fact, in the game's own font and colours.
 
